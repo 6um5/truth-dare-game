@@ -35,7 +35,7 @@ function getSystemInstruction(relationshipType: string, connectionType: string) 
 اللغة: عربية سلسة، مرحة، وجذابة.`;
 }
 
-async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string) {
+async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string, retries = 3): Promise<any> {
   try {
     // Prioritize the user's custom keys in case the default ones are broken
     const apiKey = process.env.ipa_key || process.env['2ipa_key'] || process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -46,55 +46,80 @@ async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأ�
     
     const ai = new GoogleGenAI({ apiKey: apiKey });
     const prompt = `اللاعب: ${playerName}\nالنوع المطلوب: ${type}`;
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        systemInstruction: getSystemInstruction(relationshipType, connectionType),
-        responseMimeType: 'application/json',
-        temperature: 0.9,
-        safetySettings: [
-          {
-            category: 'HARM_CATEGORY_HATE_SPEECH' as any,
-            threshold: 'BLOCK_NONE' as any,
-          },
-          {
-            category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any,
-            threshold: 'BLOCK_NONE' as any,
-          },
-          {
-            category: 'HARM_CATEGORY_HARASSMENT' as any,
-            threshold: 'BLOCK_NONE' as any,
-          },
-          {
-            category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any,
-            threshold: 'BLOCK_NONE' as any,
-          }
-        ]
-      },
-    });
-
-    if (response.text) {
-      let text = response.text.trim();
-      if (text.startsWith('```json')) {
-        text = text.replace(/^```json\n/, '').replace(/\n```$/, '');
-      } else if (text.startsWith('```')) {
-        text = text.replace(/^```\n/, '').replace(/\n```$/, '');
-      }
+    
+    let lastError;
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        return JSON.parse(text);
-      } catch (parseError) {
-        console.error('JSON Parse Error:', parseError, 'Raw Text:', text);
-        throw new Error('Failed to parse JSON');
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt,
+          config: {
+            systemInstruction: getSystemInstruction(relationshipType, connectionType),
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                player_name: { type: Type.STRING },
+                type: { type: Type.STRING },
+                text: { type: Type.STRING }
+              },
+              required: ["player_name", "type", "text"]
+            },
+            temperature: 0.9,
+            safetySettings: [
+              {
+                category: 'HARM_CATEGORY_HATE_SPEECH' as any,
+                threshold: 'BLOCK_NONE' as any,
+              },
+              {
+                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any,
+                threshold: 'BLOCK_NONE' as any,
+              },
+              {
+                category: 'HARM_CATEGORY_HARASSMENT' as any,
+                threshold: 'BLOCK_NONE' as any,
+              },
+              {
+                category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any,
+                threshold: 'BLOCK_NONE' as any,
+              }
+            ]
+          },
+        });
+
+        if (response.text) {
+          let text = response.text.trim();
+          if (text.startsWith('```json')) {
+            text = text.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+          } else if (text.startsWith('```')) {
+            text = text.replace(/^```\n?/, '').replace(/\n?```$/, '');
+          }
+          try {
+            return JSON.parse(text);
+          } catch (parseError) {
+            console.error('JSON Parse Error:', parseError, 'Raw Text:', text);
+            throw new Error('Failed to parse JSON');
+          }
+        }
+        throw new Error('No response text');
+      } catch (err: any) {
+        lastError = err;
+        console.error(`Attempt ${attempt} failed:`, err?.message || err);
+        if (attempt < retries) {
+          // Wait before retrying to handle rate limits (e.g., 429 Too Many Requests)
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+        }
       }
     }
-    throw new Error('No response text');
+    
+    throw lastError;
   } catch (error: any) {
     console.error('AI Generation Error Details:', error?.message || error);
     return {
       player_name: playerName,
       type: type,
-      text: "عذراً، حدث خطأ في الاتصال بالذكاء الاصطناعي ولم أتمكن من توليد التحدي. يرجى تخطي الدور أو المحاولة مرة أخرى!"
+      text: "عذراً، يبدو أن هناك ضغطاً على الخادم أو تأخراً في الاستجابة. يرجى المحاولة مرة أخرى!"
     };
   }
 }
