@@ -5,27 +5,27 @@ import { Server } from "socket.io";
 import path from "path";
 import { GoogleGenAI, Type } from '@google/genai';
 
-function getSystemInstruction(relationshipType: string, connectionType: string) {
+function getSystemInstruction(relationshipType: string, connectionType: string, gender: string) {
   return `أنت ذكاء اصطناعي متطور تعمل كـ 'مدير لعبة' (AI Game Master) للعبة 'سؤال أو جرأة'.
 بيئة اللعبة الحالية:
 - نوع العلاقة بين اللاعبين: ${relationshipType}
 - نوع الاتصال/التواجد: ${connectionType}
+- جنس اللاعب الذي سيتم توجيه السؤال/التحدي له: ${gender}
 
-مهمتك: توليد محتوى جديد، حصري، ومناسب جداً لنوع العلاقة. يُمنع منعاً باتاً استخدام إجابات عامة أو مكررة. يجب أن يكون المحتوى آمناً وممتعاً.
+مهمتك: توليد محتوى جديد، حصري، ومناسب جداً لنوع العلاقة وجنس اللاعب. يُمنع منعاً باتاً استخدام إجابات عامة أو مكررة.
 
 قواعد الأسئلة (سؤال):
 - **هام جداً**: يجب أن يتكون النص من **سؤالين اثنين** (سؤالين مترابطين أو متتابعين يوجهان لنفس اللاعب في نفس الوقت).
-- إذا كان النوع "أصدقاء": أسئلة خاصة بالأصدقاء، تكشف أسراراً خفيفة، مواقف مضحكة، أو آراء طريفة في الأصدقاء المتواجدين.
-- إذا كان النوع "مرتبطين": أسئلة رومانسية، جميلة، وخاصة جداً بالمرتبطين. ركز على المشاعر، الذكريات، والمواقف اللطيفة بينهما.
+- صغ الأسئلة بصيغة المخاطب المناسبة لجنس اللاعب (${gender === 'ذكر' ? 'صيغة المذكر' : 'صيغة المؤنث'}).
+- **المحتوى**: يجب أن تكون الأسئلة تجمع بين الرومانسية والتعارف العميق في نفس الوقت. أسئلة تكشف المشاعر، النظرة العاطفية، وتساعد على فهم الشخص الآخر بعمق، سواء كانوا أصدقاء (للتعرف على الجانب العاطفي لبعضهم) أو مرتبطين (لتقوية العلاقة واكتشاف جوانب جديدة).
 
 قواعد التحديات (جرأة):
-- يجب أن تكون التحديات محددة جداً ومبتكرة ومضحكة.
-- إذا كان النوع "أصدقاء": تحديات مضحكة، مجنونة، ومسلية تناسب الأصدقاء.
-- إذا كان النوع "مرتبطين": تحديات رومانسية، لطيفة، أو فيها غزل ومرح يناسب المرتبطين.
+- **المحتوى**: يجب أن تكون التحديات **محرجة جداً، جريئة، ومضحكة للغاية** لجميع الفئات. أخرج اللاعبين من منطقة الراحة الخاصة بهم!
+- صغ التحديات بصيغة المخاطب المناسبة لجنس اللاعب (${gender === 'ذكر' ? 'صيغة المذكر' : 'صيغة المؤنث'}).
 - راعِ نوع الاتصال (${connectionType}):
-  * "صوتي": تحديات تعتمد على الصوت (غناء، اعتراف صوتي، نبرة معينة).
-  * "كاميرا": حركات جسدية، تعابير وجه، أو عرض شيء بالكاميرا.
-  * "نفس المكان": تفاعل مباشر (حسب نوع العلاقة).
+  * "صوتي": تحديات تعتمد على الصوت (غناء محرج، اعتراف صوتي غريب، تقليد أصوات مضحكة).
+  * "كاميرا": حركات جسدية محرجة، تعابير وجه مضحكة، أو عرض شيء غريب بالكاميرا.
+  * "نفس المكان": تفاعل مباشر محرج ومضحك.
 
 صيغة الإخراج (Output):
 يجب أن ترد دائماً بمصفوفة (Array) من الكائنات بصيغة JSON فقط، بالشكل التالي:
@@ -36,7 +36,7 @@ function getSystemInstruction(relationshipType: string, connectionType: string) 
 اللغة: عربية سلسة، مرحة، وجذابة.`;
 }
 
-async function generateChallengeBatch(type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string, count: number = 10, retries = 3): Promise<any[]> {
+async function generateChallengeBatch(type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string, gender: string, count: number = 10, retries = 3): Promise<any[]> {
   try {
     const apiKey = process.env.ipa_key || process.env['2ipa_key'] || process.env.GEMINI_API_KEY || process.env.API_KEY;
 
@@ -55,7 +55,7 @@ async function generateChallengeBatch(type: 'سؤال' | 'جرأة', relationshi
           model: 'gemini-3.1-flash-lite-preview',
           contents: prompt,
           config: {
-            systemInstruction: getSystemInstruction(relationshipType, connectionType),
+            systemInstruction: getSystemInstruction(relationshipType, connectionType, gender),
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.ARRAY,
@@ -112,8 +112,8 @@ async function generateChallengeBatch(type: 'سؤال' | 'جرأة', relationshi
 const challengeCache = new Map<string, any[]>();
 const isFetchingCache = new Map<string, boolean>();
 
-async function getChallengeFromCache(playerName: string, type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string): Promise<any> {
-  const cacheKey = `${relationshipType}_${connectionType}_${type}`;
+async function getChallengeFromCache(playerName: string, playerGender: string, type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string): Promise<any> {
+  const cacheKey = `${relationshipType}_${connectionType}_${playerGender}_${type}`;
   
   if (!challengeCache.has(cacheKey)) {
       challengeCache.set(cacheKey, []);
@@ -124,7 +124,7 @@ async function getChallengeFromCache(playerName: string, type: 'سؤال' | 'ج�
   // Trigger background fetch if buffer is low
   if (buffer.length < 3 && !isFetchingCache.get(cacheKey)) {
       isFetchingCache.set(cacheKey, true);
-      generateChallengeBatch(type, relationshipType, connectionType, 10)
+      generateChallengeBatch(type, relationshipType, connectionType, playerGender, 10)
           .then(newChallenges => {
               buffer.push(...newChallenges);
               isFetchingCache.set(cacheKey, false);
@@ -148,7 +148,7 @@ async function getChallengeFromCache(playerName: string, type: 'سؤال' | 'ج�
   // If buffer is empty, we must wait for a fetch
   try {
       isFetchingCache.set(cacheKey, true);
-      const newChallenges = await generateChallengeBatch(type, relationshipType, connectionType, 5);
+      const newChallenges = await generateChallengeBatch(type, relationshipType, connectionType, playerGender, 5);
       buffer.push(...newChallenges);
       isFetchingCache.set(cacheKey, false);
       
@@ -178,21 +178,27 @@ async function startServer() {
 
   // API Route for Offline (Pass & Play) Mode
   app.post('/api/generate', async (req, res) => {
-    const { playerName, type, relationshipType, connectionType } = req.body;
-    if (!playerName || !type || !relationshipType || !connectionType) {
+    const { playerName, playerGender, type, relationshipType, connectionType } = req.body;
+    if (!playerName || !playerGender || !type || !relationshipType || !connectionType) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    const challenge = await getChallengeFromCache(playerName, type, relationshipType, connectionType);
+    const challenge = await getChallengeFromCache(playerName, playerGender, type, relationshipType, connectionType);
     res.json(challenge);
   });
 
   const rooms = new Map<string, any>();
+  const disconnectTimeouts = new Map<string, NodeJS.Timeout>();
 
-  const handleDisconnect = (socketId: string) => {
+  const removePlayer = (socketId: string) => {
     rooms.forEach((room, roomCode) => {
       const playerIndex = room.players.findIndex((p: any) => p.id === socketId);
       if (playerIndex !== -1) {
-        const wasHost = room.players[playerIndex].isHost;
+        const player = room.players[playerIndex];
+        if (disconnectTimeouts.has(player.sessionId)) {
+          clearTimeout(disconnectTimeouts.get(player.sessionId)!);
+          disconnectTimeouts.delete(player.sessionId);
+        }
+        const wasHost = player.isHost;
         room.players.splice(playerIndex, 1);
         
         if (room.players.length === 0) {
@@ -210,14 +216,51 @@ async function startServer() {
     });
   };
 
+  const handleDisconnect = (socketId: string) => {
+    rooms.forEach((room, roomCode) => {
+      const playerIndex = room.players.findIndex((p: any) => p.id === socketId);
+      if (playerIndex !== -1) {
+        const player = room.players[playerIndex];
+        player.connected = false;
+        io.to(roomCode).emit("room_updated", room);
+        
+        const timeout = setTimeout(() => {
+          const currentRoom = rooms.get(roomCode);
+          if (currentRoom) {
+            const pIdx = currentRoom.players.findIndex((p: any) => p.sessionId === player.sessionId);
+            if (pIdx !== -1 && !currentRoom.players[pIdx].connected) {
+              const wasHost = currentRoom.players[pIdx].isHost;
+              currentRoom.players.splice(pIdx, 1);
+
+              if (currentRoom.players.length === 0) {
+                rooms.delete(roomCode);
+              } else {
+                if (wasHost) {
+                  currentRoom.players[0].isHost = true;
+                }
+                if (currentRoom.currentPlayerIndex >= currentRoom.players.length) {
+                  currentRoom.currentPlayerIndex = 0;
+                }
+                io.to(roomCode).emit("room_updated", currentRoom);
+              }
+            }
+          }
+          disconnectTimeouts.delete(player.sessionId);
+        }, 60000); // 1 minute grace period
+
+        disconnectTimeouts.set(player.sessionId, timeout);
+      }
+    });
+  };
+
   io.on("connection", (socket) => {
-    socket.on("create_room", ({ playerName, relationshipType, connectionType }, callback) => {
+    socket.on("create_room", ({ playerName, playerGender, relationshipType, connectionType, sessionId }, callback) => {
       const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
       const newRoom = {
         id: roomCode,
         relationshipType,
         connectionType,
-        players: [{ id: socket.id, name: playerName, isHost: true }],
+        players: [{ id: socket.id, sessionId, name: playerName, gender: playerGender, isHost: true, connected: true }],
         gameState: 'setup',
         turnState: 'waiting_to_spin',
         currentPlayerIndex: 0,
@@ -230,15 +273,34 @@ async function startServer() {
       io.to(roomCode).emit("room_updated", newRoom);
     });
 
-    socket.on("join_room", ({ roomCode, playerName }, callback) => {
+    socket.on("join_room", ({ roomCode, playerName, playerGender, sessionId }, callback) => {
       const room = rooms.get(roomCode.toUpperCase());
       if (!room) return callback({ success: false, error: "الغرفة غير موجودة" });
       if (room.gameState !== 'setup') return callback({ success: false, error: "اللعبة بدأت بالفعل" });
       if (room.players.find((p: any) => p.name === playerName)) return callback({ success: false, error: "الاسم مستخدم في هذه الغرفة" });
 
-      room.players.push({ id: socket.id, name: playerName, isHost: false });
+      room.players.push({ id: socket.id, sessionId, name: playerName, gender: playerGender, isHost: false, connected: true });
       socket.join(roomCode.toUpperCase());
       callback({ success: true, roomCode: roomCode.toUpperCase() });
+      io.to(roomCode.toUpperCase()).emit("room_updated", room);
+    });
+
+    socket.on("reconnect_room", ({ sessionId, roomCode }, callback) => {
+      const room = rooms.get(roomCode.toUpperCase());
+      if (!room) return callback({ success: false });
+
+      const player = room.players.find((p: any) => p.sessionId === sessionId);
+      if (!player) return callback({ success: false });
+
+      if (disconnectTimeouts.has(sessionId)) {
+        clearTimeout(disconnectTimeouts.get(sessionId)!);
+        disconnectTimeouts.delete(sessionId);
+      }
+
+      player.id = socket.id;
+      player.connected = true;
+      socket.join(roomCode.toUpperCase());
+      callback({ success: true, room });
       io.to(roomCode.toUpperCase()).emit("room_updated", room);
     });
 
@@ -267,10 +329,10 @@ async function startServer() {
         io.to(roomCode).emit("spin_started", result);
         io.to(roomCode).emit("room_updated", room);
 
-        const currentPlayerName = room.players[room.currentPlayerIndex].name;
+        const currentPlayer = room.players[room.currentPlayerIndex];
         
         const [challenge] = await Promise.all([
-          getChallengeFromCache(currentPlayerName, result, room.relationshipType, room.connectionType),
+          getChallengeFromCache(currentPlayer.name, currentPlayer.gender, result, room.relationshipType, room.connectionType),
           new Promise(resolve => setTimeout(resolve, 3000))
         ]);
 
@@ -296,7 +358,7 @@ async function startServer() {
     });
 
     socket.on("leave_room", () => {
-      handleDisconnect(socket.id);
+      removePlayer(socket.id);
     });
 
     socket.on("disconnect", () => {

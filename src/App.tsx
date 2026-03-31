@@ -11,6 +11,7 @@ let socket: Socket;
 export default function App() {
   const [appState, setAppState] = useState<'home' | 'in_room' | 'offline'>('home');
   const [playerName, setPlayerName] = useState('');
+  const [playerGender, setPlayerGender] = useState('ذكر');
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
   
@@ -24,8 +25,36 @@ export default function App() {
   const [offlineTurnState, setOfflineTurnState] = useState<'waiting_to_spin' | 'spinning' | 'showing_result'>('waiting_to_spin');
   const [offlineChallenge, setOfflineChallenge] = useState<{type: string, text: string} | null>(null);
 
+  const [sessionId] = useState(() => {
+    let sid = localStorage.getItem('sessionId');
+    if (!sid) {
+      sid = Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('sessionId', sid);
+    }
+    return sid;
+  });
+
   useEffect(() => {
     socket = io();
+
+    socket.on("connect", () => {
+      const savedRoomCode = localStorage.getItem('roomCode');
+      if (savedRoomCode) {
+        socket.emit('reconnect_room', { sessionId, roomCode: savedRoomCode }, (res: any) => {
+          if (res.success) {
+            setAppState('in_room');
+            setRoomState(res.room);
+            const me = res.room.players.find((p: any) => p.sessionId === sessionId);
+            if (me) {
+              setPlayerName(me.name);
+              setPlayerGender(me.gender);
+            }
+          } else {
+            localStorage.removeItem('roomCode');
+          }
+        });
+      }
+    });
 
     socket.on("room_updated", (state) => {
       setRoomState(state);
@@ -48,10 +77,13 @@ export default function App() {
     if (!playerName.trim()) return setError('أدخل اسمك أولاً');
     socket.emit('create_room', { 
       playerName: playerName.trim(),
+      playerGender,
       relationshipType,
-      connectionType
+      connectionType,
+      sessionId
     }, (res: any) => {
       if (res.success) {
+        localStorage.setItem('roomCode', res.roomCode);
         setAppState('in_room');
         setError('');
       }
@@ -62,8 +94,9 @@ export default function App() {
     e.preventDefault();
     if (!playerName.trim()) return setError('أدخل اسمك أولاً');
     if (!joinCode.trim()) return setError('أدخل كود الغرفة');
-    socket.emit('join_room', { roomCode: joinCode.trim(), playerName: playerName.trim() }, (res: any) => {
+    socket.emit('join_room', { roomCode: joinCode.trim(), playerName: playerName.trim(), playerGender, sessionId }, (res: any) => {
       if (res.success) {
+        localStorage.setItem('roomCode', res.roomCode);
         setAppState('in_room');
         setError('');
       } else {
@@ -96,6 +129,7 @@ export default function App() {
 
   const leaveRoom = () => {
     socket.emit('leave_room');
+    localStorage.removeItem('roomCode');
     setAppState('home');
     setRoomState(null);
     setTargetResult(null);
@@ -110,7 +144,7 @@ export default function App() {
   const startOfflineGame = (e: React.FormEvent) => {
     e.preventDefault();
     if (!playerName.trim()) return setError('أدخل اسمك أولاً');
-    setOfflinePlayers([{ id: '1', name: playerName.trim() }]);
+    setOfflinePlayers([{ id: '1', name: playerName.trim(), gender: playerGender }]);
     setAppState('offline');
     setError('');
   };
@@ -119,8 +153,9 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const newName = formData.get('newPlayerName') as string;
+    const newGender = formData.get('newPlayerGender') as string;
     if (newName && newName.trim()) {
-      setOfflinePlayers([...offlinePlayers, { id: Date.now().toString(), name: newName.trim() }]);
+      setOfflinePlayers([...offlinePlayers, { id: Date.now().toString(), name: newName.trim(), gender: newGender }]);
       e.currentTarget.reset();
     }
   };
@@ -141,12 +176,14 @@ export default function App() {
       const currentPlayerName = offlinePlayers[offlineCurrentPlayerIndex].name;
       
       try {
+        const currentPlayer = offlinePlayers[offlineCurrentPlayerIndex];
         const [challengeRes] = await Promise.all([
           fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              playerName: currentPlayerName,
+              playerName: currentPlayer.name,
+              playerGender: currentPlayer.gender,
               type: result,
               relationshipType,
               connectionType
@@ -214,15 +251,28 @@ export default function App() {
               )}
 
               <div className="space-y-6">
-                <div>
-                  <label className="block text-white/60 text-sm mb-2">اسمك في اللعبة</label>
-                  <input
-                    type="text"
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="اكتب اسمك..."
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-[#b026ff] transition-all"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-white/60 text-sm mb-2">اسمك في اللعبة</label>
+                    <input
+                      type="text"
+                      value={playerName}
+                      onChange={(e) => setPlayerName(e.target.value)}
+                      placeholder="اكتب اسمك..."
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-[#b026ff] transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-white/60 text-sm mb-2">الجنس</label>
+                    <select
+                      value={playerGender}
+                      onChange={(e) => setPlayerGender(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-[#b026ff] transition-all appearance-none"
+                    >
+                      <option value="ذكر" className="bg-[#0a0f24]">ذكر</option>
+                      <option value="أنثى" className="bg-[#0a0f24]">أنثى</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -340,9 +390,10 @@ export default function App() {
                         exit={{ opacity: 0, x: 20 }}
                         className="flex items-center justify-between bg-white/5 rounded-lg px-4 py-3"
                       >
-                        <span className="font-semibold flex items-center gap-2">
+                        <span className={`font-semibold flex items-center gap-2 ${!player.connected ? 'opacity-50' : ''}`}>
                           {player.name}
-                          {player.id === socket.id && <span className="text-xs bg-[#b026ff]/20 text-[#b026ff] px-2 py-0.5 rounded-full">أنت</span>}
+                          {!player.connected && <span className="text-xs text-red-400">(غير متصل)</span>}
+                          {player.sessionId === sessionId && <span className="text-xs bg-[#b026ff]/20 text-[#b026ff] px-2 py-0.5 rounded-full">أنت</span>}
                         </span>
                         {player.isHost && <span className="text-xs bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-full">الهوست</span>}
                       </motion.div>
@@ -351,7 +402,7 @@ export default function App() {
                 </div>
               </div>
 
-              {roomState.players.find((p: any) => p.id === socket.id)?.isHost ? (
+              {roomState.players.find((p: any) => p.sessionId === sessionId)?.isHost ? (
                 <button
                   onClick={startGame}
                   disabled={roomState.players.length < 2}
@@ -394,11 +445,11 @@ export default function App() {
                       spinning={roomState.turnState === 'spinning'}
                       targetResult={targetResult}
                       onSpinClick={requestSpin}
-                      canSpin={roomState.turnState === 'waiting_to_spin' && (roomState.players[roomState.currentPlayerIndex].id === socket.id || roomState.players.find((p: any) => p.id === socket.id)?.isHost)}
+                      canSpin={roomState.turnState === 'waiting_to_spin' && (roomState.players[roomState.currentPlayerIndex].sessionId === sessionId || roomState.players.find((p: any) => p.sessionId === sessionId)?.isHost)}
                     />
                     
                     {roomState.turnState === 'waiting_to_spin' && (
-                      !(roomState.players[roomState.currentPlayerIndex].id === socket.id || roomState.players.find((p: any) => p.id === socket.id)?.isHost) && (
+                      !(roomState.players[roomState.currentPlayerIndex].sessionId === sessionId || roomState.players.find((p: any) => p.sessionId === sessionId)?.isHost) && (
                         <div className="mt-4 sm:mt-8 text-white/60 font-bold animate-pulse text-center">
                           في انتظار {roomState.players[roomState.currentPlayerIndex].name} لفر العجلة...
                         </div>
@@ -439,7 +490,7 @@ export default function App() {
                           <Typewriter text={roomState.currentChallenge.text} speed={40} />
                         </h2>
 
-                        {(roomState.players[roomState.currentPlayerIndex].id === socket.id || roomState.players.find((p: any) => p.id === socket.id)?.isHost) ? (
+                        {(roomState.players[roomState.currentPlayerIndex].sessionId === sessionId || roomState.players.find((p: any) => p.sessionId === sessionId)?.isHost) ? (
                           <div className="flex gap-4 w-full max-w-md">
                             <button
                               onClick={completeChallenge}
@@ -512,6 +563,13 @@ export default function App() {
                       placeholder="إضافة لاعب جديد..."
                       className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#b026ff]"
                     />
+                    <select
+                      name="newPlayerGender"
+                      className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#b026ff] appearance-none"
+                    >
+                      <option value="ذكر" className="bg-[#0a0f24]">ذكر</option>
+                      <option value="أنثى" className="bg-[#0a0f24]">أنثى</option>
+                    </select>
                     <button type="submit" className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-sm font-bold">إضافة</button>
                   </form>
                 </div>
@@ -590,6 +648,9 @@ export default function App() {
           ) : null}
         </AnimatePresence>
       </main>
+      <footer className="absolute bottom-4 left-0 w-full text-center text-white/40 text-xs z-50 pointer-events-none">
+        تم التطوير بكل حب بواسطة علوش و طوكيو ❤️
+      </footer>
     </div>
   );
 }
