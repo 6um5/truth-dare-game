@@ -17,27 +17,27 @@ function getSystemInstruction(relationshipType: string, connectionType: string) 
 - **هام جداً**: يجب أن يتكون النص من **سؤالين اثنين** (سؤالين مترابطين أو متتابعين يوجهان لنفس اللاعب في نفس الوقت).
 - إذا كان النوع "أصدقاء": أسئلة خاصة بالأصدقاء، تكشف أسراراً خفيفة، مواقف مضحكة، أو آراء طريفة في الأصدقاء المتواجدين.
 - إذا كان النوع "مرتبطين": أسئلة رومانسية، جميلة، وخاصة جداً بالمرتبطين. ركز على المشاعر، الذكريات، والمواقف اللطيفة بينهما.
-- صغ الأسئلة وكأنك توجهها للاعب مباشرة.
 
 قواعد التحديات (جرأة):
 - يجب أن تكون التحديات محددة جداً ومبتكرة ومضحكة.
 - إذا كان النوع "أصدقاء": تحديات مضحكة، مجنونة، ومسلية تناسب الأصدقاء.
-- إذا كان النوع "مرتبطين": تحديات رومانسية، لطيفة، أو فيها غزل ومرح يناسب المرتبطين (مثال: غزل، نظرات، تصرفات رومانسية لطيفة).
+- إذا كان النوع "مرتبطين": تحديات رومانسية، لطيفة، أو فيها غزل ومرح يناسب المرتبطين.
 - راعِ نوع الاتصال (${connectionType}):
   * "صوتي": تحديات تعتمد على الصوت (غناء، اعتراف صوتي، نبرة معينة).
   * "كاميرا": حركات جسدية، تعابير وجه، أو عرض شيء بالكاميرا.
   * "نفس المكان": تفاعل مباشر (حسب نوع العلاقة).
 
 صيغة الإخراج (Output):
-يجب أن ترد دائماً بصيغة JSON فقط، بالشكل التالي:
-{ "player_name": "اسم اللاعب", "type": "سؤال أو جرأة", "text": "النص المولد بالذكاء الاصطناعي هنا" }
+يجب أن ترد دائماً بمصفوفة (Array) من الكائنات بصيغة JSON فقط، بالشكل التالي:
+[
+  { "type": "سؤال أو جرأة", "text": "النص المولد بالذكاء الاصطناعي هنا" }
+]
 
 اللغة: عربية سلسة، مرحة، وجذابة.`;
 }
 
-async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string, retries = 3): Promise<any> {
+async function generateChallengeBatch(type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string, count: number = 10, retries = 3): Promise<any[]> {
   try {
-    // Prioritize the user's custom keys in case the default ones are broken
     const apiKey = process.env.ipa_key || process.env['2ipa_key'] || process.env.GEMINI_API_KEY || process.env.API_KEY;
 
     if (!apiKey) {
@@ -45,46 +45,30 @@ async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأ�
     }
     
     const ai = new GoogleGenAI({ apiKey: apiKey });
-    const prompt = `اللاعب: ${playerName}\nالنوع المطلوب: ${type}`;
+    const prompt = `النوع المطلوب: ${type}\nالعدد المطلوب: ${count} عناصر مختلفة ومبتكرة.`;
     
     let lastError;
     
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-flash-lite-preview',
           contents: prompt,
           config: {
             systemInstruction: getSystemInstruction(relationshipType, connectionType),
             responseMimeType: 'application/json',
             responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                player_name: { type: Type.STRING },
-                type: { type: Type.STRING },
-                text: { type: Type.STRING }
-              },
-              required: ["player_name", "type", "text"]
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: { type: Type.STRING },
+                  text: { type: Type.STRING }
+                },
+                required: ["type", "text"]
+              }
             },
             temperature: 0.9,
-            safetySettings: [
-              {
-                category: 'HARM_CATEGORY_HATE_SPEECH' as any,
-                threshold: 'BLOCK_NONE' as any,
-              },
-              {
-                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any,
-                threshold: 'BLOCK_NONE' as any,
-              },
-              {
-                category: 'HARM_CATEGORY_HARASSMENT' as any,
-                threshold: 'BLOCK_NONE' as any,
-              },
-              {
-                category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any,
-                threshold: 'BLOCK_NONE' as any,
-              }
-            ]
           },
         });
 
@@ -102,13 +86,18 @@ async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأ�
             throw new Error('Failed to parse JSON');
           }
         }
+        
+        if (response.candidates && response.candidates[0]?.finishReason !== 'STOP') {
+          console.error('Generation stopped due to:', response.candidates[0]?.finishReason);
+          throw new Error(`Generation stopped: ${response.candidates[0]?.finishReason}`);
+        }
+
         throw new Error('No response text');
       } catch (err: any) {
         lastError = err;
         console.error(`Attempt ${attempt} failed:`, err?.message || err);
         if (attempt < retries) {
-          // Wait before retrying to handle rate limits (e.g., 429 Too Many Requests)
-          await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+          await new Promise(resolve => setTimeout(resolve, 3000 * attempt));
         }
       }
     }
@@ -116,11 +105,66 @@ async function generateChallenge(playerName: string, type: 'سؤال' | 'جرأ�
     throw lastError;
   } catch (error: any) {
     console.error('AI Generation Error Details:', error?.message || error);
-    return {
-      player_name: playerName,
-      type: type,
-      text: "عذراً، يبدو أن هناك ضغطاً على الخادم أو تأخراً في الاستجابة. يرجى المحاولة مرة أخرى!"
-    };
+    throw error;
+  }
+}
+
+const challengeCache = new Map<string, any[]>();
+const isFetchingCache = new Map<string, boolean>();
+
+async function getChallengeFromCache(playerName: string, type: 'سؤال' | 'جرأة', relationshipType: string, connectionType: string): Promise<any> {
+  const cacheKey = `${relationshipType}_${connectionType}_${type}`;
+  
+  if (!challengeCache.has(cacheKey)) {
+      challengeCache.set(cacheKey, []);
+  }
+  
+  const buffer = challengeCache.get(cacheKey)!;
+  
+  // Trigger background fetch if buffer is low
+  if (buffer.length < 3 && !isFetchingCache.get(cacheKey)) {
+      isFetchingCache.set(cacheKey, true);
+      generateChallengeBatch(type, relationshipType, connectionType, 10)
+          .then(newChallenges => {
+              buffer.push(...newChallenges);
+              isFetchingCache.set(cacheKey, false);
+          })
+          .catch(err => {
+              console.error("Background fetch failed", err);
+              isFetchingCache.set(cacheKey, false);
+          });
+  }
+  
+  // If buffer has items, pop one and return immediately
+  if (buffer.length > 0) {
+      const challenge = buffer.shift();
+      return {
+          player_name: playerName,
+          type: challenge.type,
+          text: challenge.text
+      };
+  }
+  
+  // If buffer is empty, we must wait for a fetch
+  try {
+      isFetchingCache.set(cacheKey, true);
+      const newChallenges = await generateChallengeBatch(type, relationshipType, connectionType, 5);
+      buffer.push(...newChallenges);
+      isFetchingCache.set(cacheKey, false);
+      
+      const challenge = buffer.shift();
+      return {
+          player_name: playerName,
+          type: challenge.type,
+          text: challenge.text
+      };
+  } catch (error) {
+      isFetchingCache.set(cacheKey, false);
+      return {
+          player_name: playerName,
+          type: type,
+          text: "⚠️ عذراً، الذكاء الاصطناعي يواجه ضغطاً كبيراً في الطلبات حالياً (Rate Limit). يرجى الانتظار قليلاً ثم المحاولة مرة أخرى."
+      };
   }
 }
 
@@ -138,7 +182,7 @@ async function startServer() {
     if (!playerName || !type || !relationshipType || !connectionType) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    const challenge = await generateChallenge(playerName, type, relationshipType, connectionType);
+    const challenge = await getChallengeFromCache(playerName, type, relationshipType, connectionType);
     res.json(challenge);
   });
 
@@ -226,7 +270,7 @@ async function startServer() {
         const currentPlayerName = room.players[room.currentPlayerIndex].name;
         
         const [challenge] = await Promise.all([
-          generateChallenge(currentPlayerName, result, room.relationshipType, room.connectionType),
+          getChallengeFromCache(currentPlayerName, result, room.relationshipType, room.connectionType),
           new Promise(resolve => setTimeout(resolve, 3000))
         ]);
 
